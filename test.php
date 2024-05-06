@@ -9,54 +9,58 @@ use GuzzleHttp\Psr7\Request;
 use GuzzleHttp\Psr7\Response;
 use GuzzleHttp\Pool;
 
+const UPLOAD_CONCURRENCY = 5;
+
 $client = new Client([
     'base_uri' => 'https://upload.box.com/api/2.0/',
     'timeout' => 2.0,
 ]);
 
-uploadConcurrencyContents($client, null, 'test.txt', 'This is test');
+try {
+    // upload file to root folder which folder id 0.
+    uploadConcurrencyContents($client, $config, 0, 'test.dat', fopen('./data/test.dat', 'r'));
+} catch (Throwable $e) {
+    echo "Aborted. {$e->getMessage()}\n";
+}
 
 /**
  * @param Client $client
+ * @param array $config
  * @param string $folderId
  * @param string $fileName
  * @param $contents
  * @return void
  * @throws GuzzleException|Exception
  */
-function uploadConcurrencyContents(Client $client, string $folderId, string $fileName, $contents)
+function uploadConcurrencyContents(Client $client, array $config, string $folderId, string $fileName, $contents): void
 {
-
-    $requestUri = 'files/upload_sessions';
-
     $metaData = stream_get_meta_data($contents);
     $digestWhole = base64_encode(sha1_file($metaData['uri'], true));
 
-    // アップロードセッションを作成する
+    // create upload session
     $stat = fstat($contents);
     $fileSize = $stat['size'];
-    $sessionBody = createUploadSession($client, $requestUri, $folderId, $fileName, $fileSize);
+    $sessionBody = createUploadSession($client, $config, 'files/upload_sessions', $folderId, $fileName, $fileSize);
     $sessionId = $sessionBody['id'];
     $partSize = $sessionBody['part_size'];
 
     try {
-        // ファイルを分割して並列にアップロードする
-        $parts = uploadChunks($client, $folderId, $contents, $fileSize, $sessionId, $partSize);
+        // upload file
+        $parts = uploadAsChunks($client, $config, $folderId, $contents, $fileSize, $sessionId, $partSize);
 
-        // アップロードセッションをコミットする
-        commitSession($client, $sessionId, $digestWhole, $parts);
+        // commit upload session
+        commitSession($client, $config, $sessionId, $digestWhole, $parts);
 
-        // アップロードセッションを削除
-        $client->request('DELETE', "files/upload_sessions/$sessionId");
     } catch (Throwable $e) {
-        // アップロードセッションを削除
-        $client->request('DELETE', "files/upload_sessions/$sessionId");
         echo 'Upload session aborted.' . $e;
     }
+    // delete upload session
+    deleteSession($client, $sessionId, $config);
 }
 
 /**
  * @param Client $client
+ * @param array $config
  * @param string $requestUri
  * @param string $folderId
  * @param string $fileName
@@ -66,15 +70,19 @@ function uploadConcurrencyContents(Client $client, string $folderId, string $fil
  */
 function createUploadSession(
     Client $client,
+    array $config,
     string $requestUri,
     string $folderId,
     string $fileName,
     int $fileSize) : array
 {
     $res = $client->request('POST', $requestUri, [
+        'headers' => [
+            'Authorization' => 'Bearer ' . $config['accessToken'],
+        ],
         'json' =>
             [
-                // "folder_id" => $folderId, // if over write
+                "folder_id" => $folderId,
                 "file_size" => $fileSize,
                 "file_name" => $fileName,
             ],
@@ -84,6 +92,7 @@ function createUploadSession(
 
 /**
  * @param Client $client
+ * @param array $config
  * @param string $path
  * @param $stream
  * @param int $fileSize
@@ -91,15 +100,16 @@ function createUploadSession(
  * @param int $partSize
  * @return array
  */
-function uploadChunks(
+function uploadAsChunks(
     Client $client,
+    array $config,
     string $path,
            $stream,
     int $fileSize,
     string $sessionId,
     int $partSize) : array
 {
-    $requests = function () use ($stream, $fileSize, $sessionId, $partSize) {
+    $requests = function () use ($stream, $fileSize, $sessionId, $partSize, $config) {
         $chunkMaxSize = $partSize;
         $chunk = fread($stream, $chunkMaxSize);
         $startRange = 0;
@@ -111,6 +121,7 @@ function uploadChunks(
                 'PUT',
                 "files/upload_sessions/$sessionId",
                 [
+                    'Authorization' => 'Bearer ' . $config['accessToken'],
                     'Digest' => "sha=$digest",
                     'Content-Range' => "bytes $startRange-$endRange/$fileSize",
                     'Content-Type' => 'application/octet-stream',
@@ -124,7 +135,7 @@ function uploadChunks(
 
     $responseMap = [];
     $pool = new Pool($client, $requests(), [
-        'concurrency' => 5, // TODO to be a constant
+        'concurrency' => UPLOAD_CONCURRENCY,
         'fulfilled' => function (Response $response, $index) use (&$responseMap, $path) {
             $responseMap[$index] = $response;
         },
@@ -147,6 +158,7 @@ function uploadChunks(
 
 /**
  * @param Client $client
+ * @param array $config
  * @param string $sessionId
  * @param string $digestWhole
  * @param array $parts
@@ -155,6 +167,7 @@ function uploadChunks(
  */
 function commitSession(
     Client $client,
+    array $config,
     string $sessionId,
     string $digestWhole,
     array $parts) : array
@@ -175,6 +188,7 @@ function commitSession(
         }
         $res = $client->request('POST', "files/upload_sessions/$sessionId/commit", [
             'headers' => [
+                'Authorization' => 'Bearer ' . $config['accessToken'],
                 'Digest' => "sha=$digestWhole",
             ],
             'json' => [
@@ -187,4 +201,20 @@ function commitSession(
 
     $body = json_decode($res->getBody(), true);
     return $body['entries'][0];
+}
+
+/**
+ * @param Client $client
+ * @param string $sessionId
+ * @param array $config
+ * @return void
+ * @throws GuzzleException
+ */
+function deleteSession(Client $client, string $sessionId, array $config): void
+{
+    $client->request('DELETE', "files/upload_sessions/$sessionId", [
+        'headers' => [
+            'Authorization' => 'Bearer ' . $config['accessToken'],
+        ],
+    ]);
 }
