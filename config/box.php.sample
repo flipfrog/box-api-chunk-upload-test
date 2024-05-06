@@ -1,0 +1,5 @@
+<?php
+
+return [
+    'accessToken' => 'YOUR ACCESS TOKEN HERE',
+];
