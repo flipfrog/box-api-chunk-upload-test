@@ -40,6 +40,7 @@ function uploadConcurrencyContents(Client $client, array $config, string $folder
     // create upload session
     $stat = fstat($contents);
     $fileSize = $stat['size'];
+    // if you overwrite the existing file, API path is 'files/:fileId/upload_sessions'
     $sessionBody = createUploadSession($client, $config, 'files/upload_sessions', $folderId, $fileName, $fileSize);
     $sessionId = $sessionBody['id'];
     $partSize = $sessionBody['part_size'];
@@ -82,7 +83,7 @@ function createUploadSession(
         ],
         'json' =>
             [
-                "folder_id" => $folderId,
+                "folder_id" => $folderId, // if you overwrite the existing file, this property should be omitted.
                 "file_size" => $fileSize,
                 "file_name" => $fileName,
             ],
