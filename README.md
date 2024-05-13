@@ -8,3 +8,8 @@
 - edit `./config/box.php` with copied access token.
 - run `make` to generate a test file ./data/test.dat size of 21MB.
 - run `php test.php` to copy `./data/test.dat` to Box root folder.
+
+### I wrote a blog article about this repository.
+
+https://unknownspace.hatenablog.com/entry/box-api-chunked-upload
+
