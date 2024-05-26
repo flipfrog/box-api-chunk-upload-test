@@ -185,7 +185,7 @@ function commitSession(
             throw new Exception("Commit retry count exceeds max retry count($maxRetryCount).");
         }
         if ($retryCount > 0) {
-            usleep(500);
+            usleep(500000);
         }
         $res = $client->request('POST', "files/upload_sessions/$sessionId/commit", [
             'headers' => [
