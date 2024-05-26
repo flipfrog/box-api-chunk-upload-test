@@ -13,7 +13,7 @@ const UPLOAD_CONCURRENCY = 5;
 
 $client = new Client([
     'base_uri' => 'https://upload.box.com/api/2.0/',
-    'timeout' => 5.0,
+    'timeout' => 10.0,
 ]);
 
 try {
